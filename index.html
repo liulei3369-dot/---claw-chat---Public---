@@ -331,7 +331,7 @@
 <!-- Settings Panel -->
 <div class="settings-panel" id="settingsPanel">
   <label>API 地址</label>
-  <input type="text" id="apiUrl" placeholder="https://rrp-accessible-barrel-currency.trycloudflare.com">
+  <input type="text" id="apiUrl" placeholder="输入 API 地址，例如 https://xxx.trycloudflare.com">
   <label>
     <input type="checkbox" id="streamToggle" checked>
     流式输出
@@ -373,9 +373,14 @@ const $connDot   = document.getElementById("connDot");
 const $connText  = document.getElementById("connText");
 
 // ── API Config ──
-const DEFAULT_API = "https://rrp-accessible-barrel-currency.trycloudflare.com";
-let API_BASE = localStorage.getItem("claw_api_url") || DEFAULT_API;
+const DEFAULT_API = "";
+let API_BASE = localStorage.getItem("claw_api_url") || "";
 $apiUrl.value = API_BASE;
+
+// Auto-show settings if first visit (no saved API URL)
+if (!API_BASE) {
+  document.getElementById("settingsPanel").classList.add("open");
+}
 
 // ── Helpers ──
 function scrollBottom() {
@@ -480,6 +485,15 @@ async function sendMessage() {
   // Save API URL
   API_BASE = $apiUrl.value.trim() || DEFAULT_API;
   localStorage.setItem("claw_api_url", API_BASE);
+
+  // Validate API address
+  if (!API_BASE) {
+    addMessage("assistant", "⚠️ 请先在设置面板中填写 API 地址");
+    document.getElementById("settingsPanel").classList.add("open");
+    isSending = false;
+    $sendBtn.disabled = false;
+    return;
+  }
 
   // Add user message
   addMessage("user", text);
