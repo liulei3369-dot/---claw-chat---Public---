@@ -219,6 +219,33 @@
     cursor: not-allowed;
   }
   .input-area button svg { width: 20px; height: 20px; }
+  .input-area .upload-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    transition: color 0.15s, background 0.15s;
+  }
+  .input-area .upload-btn:hover { background: var(--border); color: var(--text); }
+  .input-area .file-name {
+    font-size: 11px;
+    color: var(--text-secondary);
+    display: none;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+  }
+  .input-area .file-name.show { display: inline-flex; }
+  .input-area .file-name .remove-file {
+    cursor: pointer;
+    color: #ef4444;
+    font-weight: bold;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .input-area .file-name .remove-file:hover { color: #dc2626; }
 
   /* ── Settings Panel ── */
   .settings-toggle {
@@ -331,7 +358,7 @@
 <!-- Settings Panel -->
 <div class="settings-panel" id="settingsPanel">
   <label>API 地址</label>
-  <input type="text" id="apiUrl" placeholder="输入 API 地址，例如 https://xxx.trycloudflare.com">
+  <input type="text" id="apiUrl" placeholder="http://localhost:8000">
   <label>
     <input type="checkbox" id="streamToggle" checked>
     流式输出
@@ -348,6 +375,18 @@
 <!-- Input -->
 <div class="input-area">
   <textarea id="input" rows="1" placeholder="输入消息..." enterkeyhint="send"></textarea>
+  <input type="file" id="fileInput" accept=".txt" style="display:none">
+  <span class="file-name" id="fileName">
+    <span id="fileNameText"></span>
+    <span class="remove-file" id="removeFile" title="移除文件">&times;</span>
+  </span>
+  <button class="upload-btn" id="uploadBtn" title="上传 .txt 文件">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+      <polyline points="17 8 12 3 7 8"></polyline>
+      <line x1="12" y1="3" x2="12" y2="15"></line>
+    </svg>
+  </button>
   <button id="sendBtn" title="发送">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -371,16 +410,17 @@ const $streamCb  = document.getElementById("streamToggle");
 const $scrollCb  = document.getElementById("autoScroll");
 const $connDot   = document.getElementById("connDot");
 const $connText  = document.getElementById("connText");
+const $fileInput = document.getElementById("fileInput");
+const $uploadBtn = document.getElementById("uploadBtn");
+const $fileName  = document.getElementById("fileName");
+const $fileNameText = document.getElementById("fileNameText");
+const $removeFile  = document.getElementById("removeFile");
+let _uploadedContent = "";
 
 // ── API Config ──
-const DEFAULT_API = "https://feminize-gothic-edition.ngrok-free.dev";
+const DEFAULT_API = "";
 let API_BASE = localStorage.getItem("claw_api_url") || "";
 $apiUrl.value = API_BASE;
-
-// Auto-show settings if first visit (no saved API URL)
-if (!API_BASE) {
-  document.getElementById("settingsPanel").classList.add("open");
-}
 
 // ── Helpers ──
 function scrollBottom() {
@@ -421,10 +461,8 @@ async function checkConnection() {
   $connDot.className = "conn-dot pending";
   $connText.textContent = "检查连接...";
   try {
-    const url = API_BASE.replace(/\/+$/, "") + "/health";
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(url, { signal: controller.signal });
+    const url = API_BASE ? API_BASE.replace(/\/+$/, "") + "/health" : "/health";
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (res.ok) {
       $connDot.className = "conn-dot on";
       $connText.textContent = "已连接";
@@ -473,17 +511,8 @@ async function sendMessage() {
   $input.style.height = "auto";
 
   // Save API URL
-  API_BASE = $apiUrl.value.trim() || DEFAULT_API;
+  API_BASE = $apiUrl.value.trim() || "";
   localStorage.setItem("claw_api_url", API_BASE);
-
-  // Validate API address
-  if (!API_BASE) {
-    addMessage("assistant", "⚠️ 请先在设置面板中填写 API 地址");
-    document.getElementById("settingsPanel").classList.add("open");
-    isSending = false;
-    $sendBtn.disabled = false;
-    return;
-  }
 
   // Add user message
   addMessage("user", text);
@@ -496,7 +525,7 @@ async function sendMessage() {
   ];
 
   const stream = $streamCb.checked;
-  const endpoint = API_BASE.replace(/\/+$/, "") + "/chat/completions";
+  const endpoint = API_BASE ? API_BASE.replace(/\/+$/, "") + "/chat/completions" : "/chat/completions";
 
   try {
     if (stream) {
@@ -607,6 +636,56 @@ $input.addEventListener("input", () => {
   $input.style.height = Math.min($input.scrollHeight, 120) + "px";
 });
 
+// ── File Upload ──
+$uploadBtn.addEventListener("click", () => $fileInput.click());
+
+$fileInput.addEventListener("change", async () => {
+  const file = $fileInput.files?.[0];
+  if (!file) return;
+  if (!file.name.endsWith(".txt")) {
+    alert("只支持 .txt 文件");
+    $fileInput.value = "";
+    return;
+  }
+  if (file.size > 500 * 1024) {
+    alert("文件超过 500KB，请缩小后重试");
+    $fileInput.value = "";
+    return;
+  }
+  try {
+    _uploadedContent = await file.text();
+    $fileNameText.textContent = file.name;
+    $fileName.classList.add("show");
+    $uploadBtn.title = `已上传: ${file.name}`;
+  } catch (e) {
+    alert("读取文件失败: " + e.message);
+    $fileInput.value = "";
+  }
+});
+
+$removeFile.addEventListener("click", () => {
+  $fileInput.value = "";
+  _uploadedContent = "";
+  $fileName.classList.remove("show");
+  $uploadBtn.title = "上传 .txt 文件";
+});
+
+// Auto-fill input when file is uploaded
+const _origSend = sendMessage;
+sendMessage = async function() {
+  if (_uploadedContent && !$input.value.trim()) {
+    $input.value = _uploadedContent;
+    $input.style.height = "auto";
+    $input.style.height = Math.min($input.scrollHeight, 120) + "px";
+    // Clear file state
+    _uploadedContent = "";
+    $fileName.classList.remove("show");
+    $fileInput.value = "";
+    $uploadBtn.title = "上传 .txt 文件";
+  }
+  return _origSend.call(this);
+};
+
 // ── Events ──
 $input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -622,7 +701,7 @@ document.getElementById("settingsToggle").addEventListener("click", () => {
 
 // Save API URL on change
 $apiUrl.addEventListener("change", () => {
-  API_BASE = $apiUrl.value.trim() || DEFAULT_API;
+  API_BASE = $apiUrl.value.trim() || "";
   localStorage.setItem("claw_api_url", API_BASE);
   checkConnection();
 });
@@ -650,5 +729,3 @@ setInterval(checkConnection, 30000);
 </script>
 </body>
 </html>
-
-
